@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/beego/beego/v2/core/utils/pagination"
+	"github.com/casdoor/casdoor/authz"
 	"github.com/casdoor/casdoor/conf"
 	"github.com/casdoor/casdoor/object"
 	"github.com/casdoor/casdoor/util"
@@ -311,6 +312,31 @@ func (c *ApiController) UpdateUser() {
 	if oldUser == nil {
 		c.ResponseError(fmt.Sprintf(c.T("general:The user: %s doesn't exist"), id))
 		return
+	}
+
+	// userId and owner override id above. Authorize the resolved user, not just
+	// the id and body checked by the request filter. The controller keeps using
+	// this resolved owner/name, so a later change to userId cannot change the
+	// target after this check.
+	if userId != "" && owner != "" {
+		subOwner, subName := "anonymous", "anonymous"
+		if username := c.GetSessionUsername(); username != "" {
+			subOwner, subName, err = util.GetOwnerAndNameFromIdWithError(username)
+			if err != nil {
+				c.ResponseError(c.T("auth:Unauthorized operation"))
+				return
+			}
+		}
+
+		allowed, err := authz.IsAllowed(subOwner, subName, c.Ctx.Request.Method, "/api/update-user", oldUser.Owner, oldUser.Name, nil)
+		if err != nil {
+			c.ResponseError(err.Error())
+			return
+		}
+		if !allowed {
+			c.ResponseError(c.T("auth:Unauthorized operation"))
+			return
+		}
 	}
 
 	if columnsStr != "" {
